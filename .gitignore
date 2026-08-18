@@ -1,0 +1,126 @@
+# ============================================================
+# Python
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ============================================================
+# Jupyter Notebook
+# ============================================================
+
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# ============================================================
+# Virtual Environments
+# ============================================================
+
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============================================================
+# Environment Variables / Secrets
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+# Credentials / private configuration
+*.pem
+*.key
+*.crt
+credentials.json
+credentials.yaml
+credentials.yml
+secrets.json
+secrets.yaml
+secrets.yml
+
+# Common cloud/service credential files
+.aws/
+.gcloud/
+.azure/
+
+# ============================================================
+# Data Science Generated Files
+# ============================================================
+
+# Large/generated model files
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.onnx
+
+# Experiment/training outputs
+mlruns/
+wandb/
+runs/
+checkpoints/
+outputs/
+artifacts/
+
+# ============================================================
+# Large / Temporary Data
+# ============================================================
+
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.log
+
+# Common local data files
+*.parquet
+*.feather
+
+# ============================================================
+# Operating System Files
+# ============================================================
+
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ============================================================
+# IDE / Editor Files
+# ============================================================
+
+.vscode/
+.idea/
+*.code-workspace
+
+# ============================================================
+# Python Tools / Build Files
+# ============================================================
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+build/
+dist/
+*.egg-info/
+
+# ============================================================
+# Local Configuration
+# ============================================================
+
+*.local
+*.local.*
