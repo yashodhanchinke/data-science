@@ -13,12 +13,14 @@ from watchdog.observers import Observer
 # CONFIGURATION
 # ============================================================
 
-PROJECT_DIR = Path(r"C:\Users\Yash\Desktop\Data Science").resolve()
+PROJECT_DIR = Path(
+    r"C:\Users\Yash\Desktop\Data Science"
+).resolve()
 
-# Wait this many seconds after the LAST detected change.
+# Wait this many seconds after the LAST detected save.
 DEBOUNCE_SECONDS = 45
 
-# Only these file types trigger an automatic backup.
+# Only these file types trigger automatic backup.
 WATCHED_EXTENSIONS = {
     ".py",
     ".ipynb",
@@ -40,6 +42,19 @@ IGNORED_DIRECTORIES = {
     ".ruff_cache",
 }
 
+# Jupyter/editor temporary files.
+TEMP_FILE_PREFIXES = (
+    ".~",
+)
+
+TEMP_FILE_SUFFIXES = (
+    "~",
+    ".tmp",
+    ".temp",
+    ".swp",
+    ".swo",
+)
+
 # Files that should never be automatically committed.
 SENSITIVE_FILE_NAMES = {
     ".env",
@@ -54,7 +69,7 @@ SENSITIVE_FILE_NAMES = {
     "secrets.yml",
 }
 
-# File extensions that commonly contain private keys/certificates.
+# File extensions that commonly contain private keys.
 SENSITIVE_EXTENSIONS = {
     ".pem",
     ".key",
@@ -68,25 +83,23 @@ SENSITIVE_EXTENSIONS = {
 timer = None
 timer_lock = threading.Lock()
 
-# Prevent two backup operations from running at the same time.
+# Prevent overlapping Git operations.
 backup_lock = threading.Lock()
 
 
 # ============================================================
-# PATH / FILE HELPERS
+# PATH HELPERS
 # ============================================================
 
 def normalize_path(path):
     """
-    Convert a watchdog event path into a pathlib.Path object.
-
-    Watchdog normally gives us strings on Windows, while the
-    rest of this script uses pathlib.Path.
+    Convert watchdog's path into pathlib.Path.
     """
+
     return Path(path).resolve()
 
 
-def is_ignored(path) -> bool:
+def is_ignored_directory(path):
     """
     Return True if the path is inside an ignored directory.
     """
@@ -95,37 +108,68 @@ def is_ignored(path) -> bool:
 
     try:
         relative_path = path.relative_to(PROJECT_DIR)
+
     except ValueError:
         return True
 
     for part in relative_path.parts:
+
         if part in IGNORED_DIRECTORIES:
             return True
 
     return False
 
 
-def is_watched_file(path) -> bool:
+def is_temporary_file(path):
     """
-    Return True only for .py and .ipynb files that are not
-    inside an ignored directory.
+    Ignore temporary files created by Jupyter/editors.
     """
 
     path = normalize_path(path)
 
-    if is_ignored(path):
+    filename = path.name
+
+    # Example:
+    # .~Python_Fundamentals.ipynb
+    for prefix in TEMP_FILE_PREFIXES:
+
+        if filename.startswith(prefix):
+            return True
+
+    # Examples:
+    # Python_Fundamentals.ipynb~
+    # Python_Fundamentals.ipynb.tmp
+    for suffix in TEMP_FILE_SUFFIXES:
+
+        if filename.endswith(suffix):
+            return True
+
+    return False
+
+
+def is_watched_file(path):
+    """
+    Return True only for real .py and .ipynb files.
+    """
+
+    path = normalize_path(path)
+
+    if is_ignored_directory(path):
+        return False
+
+    if is_temporary_file(path):
         return False
 
     return path.suffix.lower() in WATCHED_EXTENSIONS
 
 
 # ============================================================
-# SECURITY CHECK
+# SECURITY
 # ============================================================
 
 def contains_sensitive_file():
     """
-    Search the project for obvious sensitive files.
+    Check the project for obvious sensitive files.
 
     This is an additional safety layer.
     .gitignore remains the primary protection.
@@ -133,7 +177,7 @@ def contains_sensitive_file():
 
     for root, dirs, files in os.walk(PROJECT_DIR):
 
-        # Don't walk through directories that should be ignored.
+        # Don't enter ignored directories.
         dirs[:] = [
             directory
             for directory in dirs
@@ -144,31 +188,29 @@ def contains_sensitive_file():
 
             file_path = Path(root) / filename
 
-            # Check exact sensitive filenames.
             if filename in SENSITIVE_FILE_NAMES:
+
                 return True, file_path
 
-            # Check sensitive extensions.
             if file_path.suffix.lower() in SENSITIVE_EXTENSIONS:
+
                 return True, file_path
 
     return False, None
 
 
 # ============================================================
-# GIT FUNCTIONS
+# GIT
 # ============================================================
 
-def run_git_command(args):
+def run_git(args):
     """
     Run a Git command inside the project directory.
-
-    Returns the subprocess result.
     """
 
-    command_display = "git " + " ".join(args)
-
-    print(f"\n> {command_display}")
+    print(
+        "\n> git " + " ".join(args)
+    )
 
     try:
 
@@ -184,24 +226,31 @@ def run_git_command(args):
 
     except subprocess.TimeoutExpired:
 
-        print("ERROR: Git command timed out.")
+        print(
+            "ERROR: Git command timed out."
+        )
 
         return None
 
     except FileNotFoundError:
 
         print(
-            "ERROR: Git was not found."
-            "\nMake sure Git is installed and available in PATH."
+            "ERROR: Git was not found in PATH."
         )
 
         return None
 
     if result.stdout.strip():
-        print(result.stdout.strip())
+
+        print(
+            result.stdout.strip()
+        )
 
     if result.stderr.strip():
-        print(result.stderr.strip())
+
+        print(
+            result.stderr.strip()
+        )
 
     return result
 
@@ -215,53 +264,75 @@ def perform_backup():
     global timer
 
     with timer_lock:
+
         timer = None
 
-    # Prevent overlapping backup operations.
-    if not backup_lock.acquire(blocking=False):
+    # Don't run two backups simultaneously.
+    if not backup_lock.acquire(
+        blocking=False
+    ):
 
         print(
-            "\nA backup operation is already running."
-            "\nSkipping this backup trigger."
+            "\nBackup already running."
         )
 
         return
 
     try:
 
-        print("\n" + "=" * 60)
-        print("CHANGE DETECTED")
-        print("Preparing automatic Git backup...")
-        print("=" * 60)
+        print(
+            "\n" + "=" * 60
+        )
+
+        print(
+            "PREPARING AUTOMATIC GIT BACKUP"
+        )
+
+        print(
+            "=" * 60
+        )
 
         # ----------------------------------------------------
         # SECURITY CHECK
         # ----------------------------------------------------
 
-        sensitive_found, sensitive_path = contains_sensitive_file()
+        sensitive_found, sensitive_path = (
+            contains_sensitive_file()
+        )
 
         if sensitive_found:
 
-            print("\n" + "!" * 60)
-            print("SECURITY STOP")
-            print("!" * 60)
-
             print(
-                "\nA potentially sensitive file was found:"
-            )
-
-            print(f"  {sensitive_path}")
-
-            print(
-                "\nAutomatic commit has been cancelled."
+                "\n" + "!" * 60
             )
 
             print(
-                "Check your .gitignore and remove/move the "
-                "sensitive file if necessary."
+                "SECURITY STOP"
             )
 
-            print("!" * 60)
+            print(
+                "!" * 60
+            )
+
+            print(
+                "\nPotentially sensitive file found:"
+            )
+
+            print(
+                f"  {sensitive_path}"
+            )
+
+            print(
+                "\nAutomatic commit cancelled."
+            )
+
+            print(
+                "Check your .gitignore before continuing."
+            )
+
+            print(
+                "!" * 60
+            )
 
             return
 
@@ -269,45 +340,101 @@ def perform_backup():
         # CHECK GIT STATUS
         # ----------------------------------------------------
 
-        status = run_git_command(
-            ["status", "--porcelain"]
+        status = run_git(
+            [
+                "status",
+                "--porcelain",
+            ]
         )
 
         if status is None:
-            print("ERROR: Git status could not be executed.")
             return
 
         if status.returncode != 0:
 
             print(
-                "\nERROR: Git status returned an error."
+                "\nERROR: git status failed."
             )
 
             return
 
-        # No changes means there is nothing to commit.
         if not status.stdout.strip():
 
             print(
                 "\nNo Git changes found."
-                "\nNothing to commit."
             )
 
             return
 
         # ----------------------------------------------------
-        # STAGE CHANGES
+        # FIND RELEVANT CHANGED FILES
         # ----------------------------------------------------
 
-        print("\nStaging changes...")
+        changed_files = []
 
-        add_result = run_git_command(
-            ["add", "."]
+        for line in status.stdout.splitlines():
+
+            if len(line) < 4:
+                continue
+
+            filename = line[3:].strip()
+
+            # Handle Git rename output:
+            #
+            # old.py -> new.py
+            #
+            if " -> " in filename:
+
+                filename = filename.split(
+                    " -> "
+                )[-1]
+
+            file_path = (
+                PROJECT_DIR / filename
+            ).resolve()
+
+            if is_watched_file(file_path):
+
+                changed_files.append(
+                    filename
+                )
+
+        if not changed_files:
+
+            print(
+                "\nNo .py or .ipynb changes "
+                "require an automatic backup."
+            )
+
+            return
+
+        print(
+            "\nRelevant changed files:"
+        )
+
+        for filename in changed_files:
+
+            print(
+                f"  - {filename}"
+            )
+
+        # ----------------------------------------------------
+        # STAGE ONLY RELEVANT FILES
+        # ----------------------------------------------------
+
+        print(
+            "\nStaging relevant files..."
+        )
+
+        add_result = run_git(
+            [
+                "add",
+                "--",
+                *changed_files,
+            ]
         )
 
         if add_result is None:
-
-            print("ERROR: git add could not be executed.")
 
             return
 
@@ -323,7 +450,7 @@ def perform_backup():
         # CHECK STAGED FILES
         # ----------------------------------------------------
 
-        staged = run_git_command(
+        staged = run_git(
             [
                 "diff",
                 "--cached",
@@ -332,17 +459,12 @@ def perform_backup():
         )
 
         if staged is None:
-
-            print(
-                "ERROR: Could not inspect staged changes."
-            )
-
             return
 
         if staged.returncode != 0:
 
             print(
-                "ERROR: Git could not inspect staged changes."
+                "\nERROR: Could not inspect staged changes."
             )
 
             return
@@ -357,21 +479,22 @@ def perform_backup():
 
             print(
                 "\nNothing was staged."
-                "\nNo commit will be created."
             )
 
             return
 
         print(
-            "\nFiles staged for automatic backup:"
+            "\nFiles staged:"
         )
 
         for filename in staged_files:
 
-            print(f"  + {filename}")
+            print(
+                f"  + {filename}"
+            )
 
         # ----------------------------------------------------
-        # CREATE COMMIT
+        # COMMIT
         # ----------------------------------------------------
 
         timestamp = datetime.now().strftime(
@@ -383,11 +506,14 @@ def perform_backup():
         )
 
         print(
-            f"\nCreating commit:"
-            f"\n{commit_message}"
+            "\nCreating commit:"
         )
 
-        commit_result = run_git_command(
+        print(
+            f"  {commit_message}"
+        )
+
+        commit_result = run_git(
             [
                 "commit",
                 "-m",
@@ -396,49 +522,38 @@ def perform_backup():
         )
 
         if commit_result is None:
-
-            print(
-                "ERROR: git commit could not be executed."
-            )
-
             return
 
         if commit_result.returncode != 0:
 
             print(
-                "\nERROR: git commit failed."
+                "\nERROR: Git commit failed."
             )
 
             print(
-                "\nYour changes may still be staged."
-            )
-
-            print(
-                "Run 'git status' to inspect them."
+                "Run 'git status' to inspect the repository."
             )
 
             return
 
         # ----------------------------------------------------
-        # PUSH TO GITHUB
+        # PUSH
         # ----------------------------------------------------
 
         print(
             "\nPushing commit to GitHub..."
         )
 
-        push_result = run_git_command(
-            ["push"]
+        push_result = run_git(
+            [
+                "push",
+            ]
         )
 
         if push_result is None:
 
             print(
-                "\nERROR: git push could not be executed."
-            )
-
-            print(
-                "The commit exists locally."
+                "\nCommit exists locally."
             )
 
             return
@@ -459,15 +574,14 @@ def perform_backup():
 
             print(
                 "\nThe commit exists locally,"
-                "\nbut it may not be on GitHub."
             )
 
             print(
-                "\nRun:"
+                "but it may not be on GitHub."
             )
 
             print(
-                "  git status"
+                "\nYou can retry later with:"
             )
 
             print(
@@ -484,9 +598,17 @@ def perform_backup():
         # SUCCESS
         # ----------------------------------------------------
 
-        print("\n" + "=" * 60)
-        print("AUTOMATIC GIT BACKUP SUCCESSFUL")
-        print("=" * 60)
+        print(
+            "\n" + "=" * 60
+        )
+
+        print(
+            "AUTOMATIC GIT BACKUP SUCCESSFUL"
+        )
+
+        print(
+            "=" * 60
+        )
 
         print(
             f"\nCommit:"
@@ -494,10 +616,12 @@ def perform_backup():
         )
 
         print(
-            "\nChanges have been pushed to GitHub."
+            "\nPushed successfully to GitHub."
         )
 
-        print("=" * 60)
+        print(
+            "=" * 60
+        )
 
     finally:
 
@@ -508,20 +632,25 @@ def perform_backup():
 # FILE EVENT HANDLER
 # ============================================================
 
-class ChangeHandler(FileSystemEventHandler):
+class ChangeHandler(
+    FileSystemEventHandler
+):
 
     def schedule_backup(self, path):
 
         path = normalize_path(path)
 
-        # Ignore everything except .py and .ipynb files.
+        # Ignore everything except real .py/.ipynb files.
         if not is_watched_file(path):
+
             return
 
         try:
 
-            relative_path = path.relative_to(
-                PROJECT_DIR
+            relative_path = (
+                path.relative_to(
+                    PROJECT_DIR
+                )
             )
 
         except ValueError:
@@ -529,22 +658,25 @@ class ChangeHandler(FileSystemEventHandler):
             return
 
         print(
-            f"\nDetected change:"
-            f"\n  {relative_path}"
+            "\nDetected save:"
+        )
+
+        print(
+            f"  {relative_path}"
         )
 
         global timer
 
         with timer_lock:
 
-            # Cancel the previous timer.
+            # Reset the previous timer.
             if timer is not None:
+
                 timer.cancel()
 
-            # Start a fresh debounce timer.
             timer = threading.Timer(
                 DEBOUNCE_SECONDS,
-                perform_backup
+                perform_backup,
             )
 
             timer.daemon = True
@@ -554,7 +686,7 @@ class ChangeHandler(FileSystemEventHandler):
         print(
             f"Backup scheduled in "
             f"{DEBOUNCE_SECONDS} seconds "
-            f"after the last change."
+            f"after the last save."
         )
 
     def on_modified(self, event):
@@ -589,7 +721,7 @@ class ChangeHandler(FileSystemEventHandler):
 def main():
 
     # --------------------------------------------------------
-    # Verify project directory
+    # Check project directory
     # --------------------------------------------------------
 
     if not PROJECT_DIR.exists():
@@ -598,26 +730,26 @@ def main():
             "ERROR: Project directory does not exist:"
         )
 
-        print(PROJECT_DIR)
+        print(
+            PROJECT_DIR
+        )
 
         return
 
     # --------------------------------------------------------
-    # Verify Git repository
+    # Check Git repository
     # --------------------------------------------------------
 
-    git_directory = PROJECT_DIR / ".git"
-
-    if not git_directory.exists():
+    if not (
+        PROJECT_DIR / ".git"
+    ).exists():
 
         print(
-            "ERROR: This folder is not a Git repository:"
+            "ERROR: Git repository not found."
         )
 
-        print(PROJECT_DIR)
-
         print(
-            "\nRun 'git init' first."
+            PROJECT_DIR
         )
 
         return
@@ -626,13 +758,17 @@ def main():
     # Startup information
     # --------------------------------------------------------
 
-    print("=" * 60)
+    print(
+        "=" * 60
+    )
 
     print(
         "DATA SCIENCE GIT AUTO-BACKUP WATCHER"
     )
 
-    print("=" * 60)
+    print(
+        "=" * 60
+    )
 
     print(
         f"Project:"
@@ -656,17 +792,20 @@ def main():
         "\n  .ipynb_checkpoints"
         "\n  __pycache__"
         "\n  virtual environments"
-        "\n  IDE folders"
+        "\n  IDE files"
+        "\n  Jupyter temporary files"
     )
 
     print(
         "\nPress Ctrl+C to stop the watcher."
     )
 
-    print("=" * 60)
+    print(
+        "=" * 60
+    )
 
     # --------------------------------------------------------
-    # Start watchdog observer
+    # Start watchdog
     # --------------------------------------------------------
 
     event_handler = ChangeHandler()
@@ -676,7 +815,7 @@ def main():
     observer.schedule(
         event_handler,
         str(PROJECT_DIR),
-        recursive=True
+        recursive=True,
     )
 
     observer.start()
@@ -695,7 +834,6 @@ def main():
 
         observer.stop()
 
-        # Cancel pending debounce timer.
         with timer_lock:
 
             if timer is not None:
@@ -714,7 +852,7 @@ def main():
 
 
 # ============================================================
-# PROGRAM ENTRY POINT
+# ENTRY POINT
 # ============================================================
 
 if __name__ == "__main__":
